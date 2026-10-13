@@ -2,6 +2,12 @@ use std::{io::Result, process::Command};
 
 fn main() -> Result<()> {
     println!("cargo::rerun-if-changed=GameTracking-CS2/Protobufs/demo.proto");
+    println!("cargo::rerun-if-env-changed=CSGOPROTO_REGENERATE");
+    // src/protobuf.rs is committed. Regenerating needs protoc and clones the latest Valve
+    // protos, which can break the build whenever Valve changes them; opt in explicitly.
+    if std::env::var_os("CSGOPROTO_REGENERATE").is_none() && std::path::Path::new("src/protobuf.rs").exists() {
+        return Ok(());
+    }
 
     Command::new("git")
         .args([

@@ -65,7 +65,7 @@ impl<'a> Parser<'a> {
     }
     pub fn parse_demo(&mut self, demo_bytes: &[u8]) -> Result<DemoOutput, DemoParserError> {
         let _prof = std::env::var("CS2_PROF").is_ok();
-        let _t = std::time::Instant::now();
+        let _t = ProfTimer::now();
         let mut first_pass_parser = FirstPassParser::new(&self.input);
         let first_pass_output = first_pass_parser.parse_demo(demo_bytes, false)?;
         if _prof {
@@ -132,14 +132,14 @@ impl<'a> Parser<'a> {
     }
     fn second_pass_single_threaded(&self, outer_bytes: &[u8], first_pass_output: FirstPassOutput) -> Result<DemoOutput, DemoParserError> {
         let prof = std::env::var("CS2_PROF").is_ok();
-        let mut t = std::time::Instant::now();
+        let mut t = ProfTimer::now();
         let mut parser = SecondPassParser::new(first_pass_output.clone(), 16, true, None)?;
         parser.start(outer_bytes)?;
-        if prof { eprintln!("[prof] second_pass start(): {:.3}s", t.elapsed().as_secs_f64()); t = std::time::Instant::now(); }
+        if prof { eprintln!("[prof] second_pass start(): {:.3}s", t.elapsed().as_secs_f64()); t = ProfTimer::now(); }
         let second_pass_output = parser.create_output();
-        if prof { eprintln!("[prof] create_output: {:.3}s", t.elapsed().as_secs_f64()); t = std::time::Instant::now(); }
+        if prof { eprintln!("[prof] create_output: {:.3}s", t.elapsed().as_secs_f64()); t = ProfTimer::now(); }
         let mut outputs = self.combine_outputs(&mut vec![second_pass_output], first_pass_output);
-        if prof { eprintln!("[prof] combine_outputs: {:.3}s", t.elapsed().as_secs_f64()); t = std::time::Instant::now(); }
+        if prof { eprintln!("[prof] combine_outputs: {:.3}s", t.elapsed().as_secs_f64()); t = ProfTimer::now(); }
         if let Some(new_df) = self.rm_unwanted_ticks(&mut outputs.df) {
             outputs.df = new_df;
         }
@@ -500,5 +500,24 @@ impl SellBackHelper {
             }
         }
         None
+    }
+}
+
+/// `std::time::Instant` panics on wasm32-unknown-unknown; profiling is a no-op there.
+#[derive(Clone, Copy)]
+struct ProfTimer(#[cfg(not(target_arch = "wasm32"))] std::time::Instant);
+
+impl ProfTimer {
+    fn now() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        return Self(std::time::Instant::now());
+        #[cfg(target_arch = "wasm32")]
+        return Self();
+    }
+    fn elapsed(&self) -> std::time::Duration {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.0.elapsed();
+        #[cfg(target_arch = "wasm32")]
+        return std::time::Duration::ZERO;
     }
 }
