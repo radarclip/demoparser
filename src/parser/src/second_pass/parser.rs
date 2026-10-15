@@ -32,6 +32,25 @@ use snap::raw::decompress_len;
 use snap::raw::Decoder as SnapDecoder;
 
 use super::variants::{InputHistory, UserCmdSubtickMove};
+
+thread_local! {
+    static PROGRESS: std::cell::RefCell<Option<Box<dyn Fn(usize, usize)>>> = std::cell::RefCell::new(None);
+}
+const PROGRESS_EVERY: usize = 4 << 20;
+
+/// Report how far the second pass is, as (bytes read, total bytes), about every 4 MB. Set it on
+/// the thread that parses (ForceSingleThreaded); `None` turns it off.
+pub fn set_progress(callback: Option<Box<dyn Fn(usize, usize)>>) {
+    PROGRESS.with(|p| *p.borrow_mut() = callback);
+}
+
+fn report_progress(at: usize, total: usize) {
+    PROGRESS.with(|p| {
+        if let Some(f) = p.borrow().as_ref() {
+            f(at, total)
+        }
+    });
+}
 use super::usercmd_delta::apply_delta;
 
 const OUTER_BUF_DEFAULT_LEN: usize = 400_000;
@@ -87,6 +106,7 @@ impl<'a> SecondPassParser<'a> {
             PROF_DECODE_NS.with(|c| c.set(0));
         }
         let started_at = self.ptr;
+        let mut reported = self.ptr;
         // re-use these to avoid allocation
         let mut buf = vec![0_u8; INNER_BUF_DEFAULT_LEN];
         let mut buf2 = vec![0_u8; OUTER_BUF_DEFAULT_LEN];
@@ -95,6 +115,10 @@ impl<'a> SecondPassParser<'a> {
             // Need at least a few bytes to read frame header (3 varints, minimum 1 byte each)
             if self.ptr + 3 > demo_bytes.len() {
                 break;
+            }
+            if self.ptr >= reported + PROGRESS_EVERY {
+                reported = self.ptr;
+                report_progress(self.ptr, demo_bytes.len());
             }
             let frame = match self.read_frame(demo_bytes) {
                 Ok(f) => f,
